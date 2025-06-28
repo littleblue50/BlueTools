@@ -1,4 +1,4 @@
-v0.0.2 (2026-06-29)
+v0.0.2 (2025-06-29)
 - Now changes you to a gatherer before entering diadem if you are not one.
 - Changes to fisher if you start fishing
 - Fixed a bug where stopping during fishing wouldnt stop you casting
