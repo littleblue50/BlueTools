@@ -2,6 +2,7 @@ using BlueTools.Enums;
 using BlueTools.Services;
 using BlueTools.Data;
 using ECommons.Automation.NeoTaskManager.Tasks;
+using ECommons.ExcelServices;
 using BlueTools.Utils;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
@@ -43,8 +44,14 @@ public unsafe class DiademHelper : BaseModule
             Service.IPC.NavMeshIPC.Stop();
         }
         
-        // Stop fishing and clean up anonymous presets
-        StopFishing();
+        // Stop fishing directly without using TaskManager
+        if (Svc.Condition[ConditionFlag.Fishing])
+        {
+            Fishing.QuitFishing();
+        }
+        
+        // Clean up AutoHook presets
+        Service.IPC.AutohookIPC.DeleteAllAnonymousPresets();
         
         // Also abort any TaskManager tasks
         P.TaskManager.Abort();
@@ -88,6 +95,27 @@ public unsafe class DiademHelper : BaseModule
             Svc.Condition[ConditionFlag.WaitingForDuty] ||
             Svc.Condition[ConditionFlag.WaitingForDutyFinder]) return;
         
+        if (Player.Job != Job.BTN && Player.Job != Job.FSH && Player.Job != Job.MIN)
+        {
+            bool changedJob = Service.Utils.PlayerHelper.ChangeJob(Job.BTN);
+            if (!changedJob)
+            {
+                changedJob = Service.Utils.PlayerHelper.ChangeJob(Job.MIN);
+            }
+            if (!changedJob)
+            {
+                changedJob = Service.Utils.PlayerHelper.ChangeJob(Job.FSH);
+            }
+            
+            if (!changedJob)
+            {
+                PluginLog.Error("Failed to become a gatherer, disabling module");
+                Disable();
+                return;
+            }
+
+        }
+
         if (Player.Territory == (uint)TerritoryType.Firmament)
         {
             P.TaskManager.Enqueue(() => Travel.MoveToPosition(new Vector3(-19.187387f, -16f, 142.10204f)));
@@ -116,14 +144,18 @@ public unsafe class DiademHelper : BaseModule
     
     private void Fish()
     {
-        // Check for fish amiss message
+        if (P.TaskManager.IsBusy) return;
+
+        if (Player.Job != Job.FSH)
+        {
+            Service.Utils.PlayerHelper.ChangeJob(Job.FSH);
+        }
+        
         if (EzThrottler.Throttle("DiademAmissCheck", 500))
         {
             CheckForFishAmissMessage();
         }
 
-        if (P.TaskManager.IsBusy) return;
-        
         var currentWeather = Weather.GetCurrentWeather();
         var targetGrade = BlueTools.Config.DiademTargetGrade;
 
@@ -307,7 +339,6 @@ public unsafe class DiademHelper : BaseModule
         
         PluginLog.Information("Fish sense something amiss - rotating to next fishing position");
         
-        // Stop current fishing (this has its own throttling)
         StopFishing();
         
         // Get the next fishing position and move there

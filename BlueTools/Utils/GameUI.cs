@@ -22,6 +22,7 @@ public unsafe class GameUI
         if (GenericHelpers.TryGetAddonMaster<AddonMaster.SelectString>(out var addon) && addon.IsVisible && addon.Entries.Length > 0)
         {
             addon.Entries[index].Select();
+
             return true;
         }
         return false;
@@ -31,8 +32,11 @@ public unsafe class GameUI
     {
         if (GenericHelpers.TryGetAddonMaster<AddonMaster.SelectYesno>(out var addon) && addon.IsVisible)
         {
-            if (yes) addon.Yes();
-            else addon.No();
+            while (addon.IsVisible) {
+                if (yes) addon.Yes();
+                else addon.No();
+                EzThrottler.Throttle("SelectYesno", 1000);
+            }
 
             return true;
         }
