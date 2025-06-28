@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Attach FF14",
+      "type": "coreclr",
+      "request": "attach",
+      "processName": "ffxiv_dx11.exe"
+    }
+  ]
+}
