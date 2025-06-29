@@ -21,6 +21,8 @@ public unsafe class DiademHelper : BaseModule
     private ShopNPCInfo merchantNPC = new(new Vector3(-641.9315f,285.2844f,-138.1888f), 4303540818, 263016);
     private ulong diademEntryNPCObjectId = 4303233947;
     
+    private int currentTargetGrade = BlueTools.Config.DiademTargetGrade;
+    
     protected override void OnEnable()
     {
         PluginLog.Information($"{Name} module enabled");
@@ -35,20 +37,18 @@ public unsafe class DiademHelper : BaseModule
             Service.IPC.NavMeshIPC.Stop();
         }
         
-        // Stop fishing directly without using TaskManager
-        if (Svc.Condition[ConditionFlag.Fishing])
+        if (P.TaskManager.IsBusy)
         {
-            Fishing.QuitFishing();
+            P.TaskManager.Abort();
         }
-        
-        // Clean up AutoHook presets
-        Service.IPC.AutohookIPC.DeleteAllAnonymousPresets();
-        
-        // Also abort any TaskManager tasks
-        P.TaskManager.Abort();
+
+        StopFishing();
         
         // Clear shop states to prevent stuck states on restart
         Service.Utils.Shop.ClearAllSessions();
+        
+        // Clear fishing position cache to ensure fresh random positions on next enable
+        DiademFish.ClearPositionCache();
     }
     
     public override void Tick()
@@ -59,6 +59,24 @@ public unsafe class DiademHelper : BaseModule
         {
             EnterDiadem();
             return;
+        }
+        
+        // Check if target grade changed and abort current tasks if needed
+        if (currentTargetGrade != BlueTools.Config.DiademTargetGrade)
+        {
+            PluginLog.Information($"Target grade changed from {currentTargetGrade} to {BlueTools.Config.DiademTargetGrade}, aborting current tasks");
+            
+            // Stop any navigation
+            if (Service.IPC.NavMeshIPC.IsRunning())
+            {
+                Service.IPC.NavMeshIPC.Stop();
+            }
+            
+            // Abort TaskManager tasks
+            P.TaskManager.Abort();
+            
+            // Update to new target grade
+            currentTargetGrade = BlueTools.Config.DiademTargetGrade;
         }
         
         if (!EzThrottler.Throttle("DiademHelperTick", 1000)) return;
@@ -191,7 +209,7 @@ public unsafe class DiademHelper : BaseModule
             if (EzThrottler.Throttle("BaitChangeAttempt", 2000))
             {
                 PluginLog.Information($"Changing bait to {requiredBait.Value}");
-                Actions.ChangeBait(requiredBait.Value);
+                Fishing.ChangeBait(requiredBait.Value);
             }
             return;
         }

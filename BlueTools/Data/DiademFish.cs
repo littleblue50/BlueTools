@@ -206,4 +206,12 @@ public static class DiademFish
     {
         return AutohookPresetStrategy.TryGetValue((grade, weather), out var preset) ? preset : null;
     }
+
+    /// <summary>
+    /// Clear all cached position indices to force fresh random selection on next access
+    /// </summary>
+    public static void ClearPositionCache()
+    {
+        CurrentPositionIndex.Clear();
+    }
 }

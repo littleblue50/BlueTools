@@ -14,7 +14,7 @@ public static class Service
 
     public static class Utils
     {
-        public static Actions Actions = new();
+        public static Fishing Fishing = new();
         public static GameUI GameUI = new();
         public static PlayerHelper PlayerHelper = new();
         public static Shop Shop = new();
