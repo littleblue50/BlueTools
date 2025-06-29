@@ -1,3 +1,8 @@
+v0.0.4
+- Fixed inability to change grade en-route
+- Fixed random position not resetting on module stop/start
+- Fixed inability to stop fishing mid-reel
+
 v0.0.3
 - Tweaked grade 2 fishing preset
 - Added grade 3 fishing presets
