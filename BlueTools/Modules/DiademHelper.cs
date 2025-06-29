@@ -21,15 +21,6 @@ public unsafe class DiademHelper : BaseModule
     private ShopNPCInfo merchantNPC = new(new Vector3(-641.9315f,285.2844f,-138.1888f), 4303540818, 263016);
     private ulong diademEntryNPCObjectId = 4303233947;
     
-    // All bait types we need to track
-    private readonly BaitType[] requiredBaits = 
-    {
-        BaitType.DiademBalloonBug,
-        BaitType.DiademCraneFly,
-        BaitType.DiademHoverworm,
-        BaitType.DiademRedBalloon
-    };
-    
     protected override void OnEnable()
     {
         PluginLog.Information($"{Name} module enabled");
@@ -219,6 +210,10 @@ public unsafe class DiademHelper : BaseModule
 
     private bool NeedToRestockBait()
     {
+        var targetGrade = BlueTools.Config.DiademTargetGrade;
+        var requiredBaits = GetRequiredBaitsForGrade(targetGrade);
+        
+        // Check if we have at least one of each possible bait type for this grade
         foreach (var bait in requiredBaits)
         {
             var currentCount = inventoryManager->GetInventoryItemCount((uint)bait);
@@ -228,6 +223,32 @@ public unsafe class DiademHelper : BaseModule
             }
         }
         return false;
+    }
+
+    private HashSet<BaitType> GetRequiredBaitsForGrade(int grade)
+    {
+        var baits = new HashSet<BaitType>();
+        
+        // Get all possible baits for this grade across all weather conditions
+        var weatherTypes = new[] 
+        { 
+            WeatherType.Snow, 
+            WeatherType.UmbralDuststorms, 
+            WeatherType.UmbralFlare, 
+            WeatherType.UmbralLevin, 
+            WeatherType.UmbralTempest 
+        };
+        
+        foreach (var weather in weatherTypes)
+        {
+            var bait = DiademFish.GetBait(grade, weather);
+            if (bait.HasValue)
+            {
+                baits.Add(bait.Value);
+            }
+        }
+        
+        return baits;
     }
 
     private bool IsAtCorrectFishingPosition(int targetGrade, WeatherType currentWeather)
@@ -359,7 +380,9 @@ public unsafe class DiademHelper : BaseModule
     {
         if (P.TaskManager.IsBusy) return;
 
-        // Check what items need restocking
+        var targetGrade = BlueTools.Config.DiademTargetGrade;
+        var requiredBaits = GetRequiredBaitsForGrade(targetGrade);
+        
         var itemsToBuy = new List<(uint itemId, int count)>();
         
         foreach (var bait in requiredBaits)
@@ -374,12 +397,12 @@ public unsafe class DiademHelper : BaseModule
         // Only proceed if there are items to buy
         if (itemsToBuy.Count == 0) return;
         
-        PluginLog.Information($"Restocking bait: {string.Join(", ", itemsToBuy.Select(x => $"{x.count}x{x.itemId}"))}");
+        PluginLog.Information($"Restocking bait for Grade {targetGrade}: {string.Join(", ", itemsToBuy.Select(x => $"{x.count}x{(BaitType)x.itemId}"))}");
         
         // Move to merchant first
         P.TaskManager.Enqueue(() => Travel.MoveToPosition(merchantNPC.Position));
         
-        // Buy all items in one shop session
+        // Buy all required baits
         P.TaskManager.Enqueue(() => Service.Utils.Shop.BuyFromShop(merchantNPC.VendorId, merchantNPC.ShopId, itemsToBuy.ToArray()));
     }
 
