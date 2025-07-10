@@ -23,10 +23,21 @@ public unsafe class DiademHelper : BaseModule
     
     private int currentTargetGrade = BlueTools.Config.DiademTargetGrade;
     
+    private enum ActionState
+    {
+        Idle,
+        TravellingToFirmament,
+        EnteringDiadem,
+        RestockingBait,
+    }
+
+    private ActionState actionState = ActionState.Idle;
     protected override void OnEnable()
     {
         PluginLog.Information($"{Name} module enabled");
-        Service.Utils.Shop.ClearAllSessions(); // Clear any stuck shop states
+        actionState = ActionState.Idle;
+
+        Service.Utils.Shop.ClearSession(); // Clear any stuck shop states
     }
     
     protected override void OnDisable()
@@ -45,10 +56,12 @@ public unsafe class DiademHelper : BaseModule
         StopFishing();
         
         // Clear shop states to prevent stuck states on restart
-        Service.Utils.Shop.ClearAllSessions();
+        Service.Utils.Shop.ClearSession();
         
         // Clear fishing position cache to ensure fresh random positions on next enable
         DiademFish.ClearPositionCache();
+
+        actionState = ActionState.Idle;
     }
     
     public override void Tick()
@@ -94,7 +107,7 @@ public unsafe class DiademHelper : BaseModule
 
     private void EnterDiadem()
     {
-        if (Player.IsBusy) return;
+        if (Player.IsBusy || Player.IsInDuty) return;
         if (P.TaskManager.IsBusy) return;
         if (Service.IPC.NavMeshIPC.IsRunning()) return;
         if (Service.IPC.LifestreamIPC.IsBusy()) return;
@@ -122,11 +135,14 @@ public unsafe class DiademHelper : BaseModule
                 Disable();
                 return;
             }
-
         }
 
         if (Player.Territory == (uint)TerritoryType.Firmament)
         {
+            if (actionState == ActionState.EnteringDiadem) return;
+            actionState = ActionState.EnteringDiadem;
+
+            PluginLog.Information("In Firmament, queueing for Diadem");
             P.TaskManager.Enqueue(() => Travel.MoveToPosition(new Vector3(-19.187387f, -16f, 142.10204f)));
             
             var npc = Svc.Objects.First(x => x.GameObjectId == diademEntryNPCObjectId);
@@ -136,9 +152,14 @@ public unsafe class DiademHelper : BaseModule
             P.TaskManager.Enqueue(() => Service.Utils.GameUI.SelectListIndex(0));
             P.TaskManager.Enqueue(() => Service.Utils.GameUI.SelectYesno());
             P.TaskManager.Enqueue(() => Service.Utils.GameUI.ConfirmContentsFinder());
+
+            actionState = ActionState.Idle;
         }
         else
         {
+            if (actionState == ActionState.TravellingToFirmament) return;
+            actionState = ActionState.TravellingToFirmament;
+
             PluginLog.Information("Teleporting to Foundation and then Firmament to enter Diadem");
             P.TaskManager.Enqueue(() => Service.IPC.LifestreamIPC.Teleport((uint)Aetheryte.Foundation, 0));
             P.TaskManager.Enqueue(() => Player.Territory == (uint)TerritoryType.Foundation && !Player.IsBusy);
@@ -160,11 +181,6 @@ public unsafe class DiademHelper : BaseModule
             Service.Utils.PlayerHelper.ChangeJob(Job.FSH);
         }
         
-        if (EzThrottler.Throttle("DiademAmissCheck", 500))
-        {
-            CheckForFishAmissMessage();
-        }
-
         var currentWeather = Weather.GetCurrentWeather();
         var targetGrade = BlueTools.Config.DiademTargetGrade;
 
@@ -215,12 +231,16 @@ public unsafe class DiademHelper : BaseModule
         }
 
         // Start fishing if not already fishing and ready
-        var isFishing = Svc.Condition[ConditionFlag.Fishing];
-        var isMounted = Player.Mounted;
+        var isFishing = Svc.Condition[ConditionFlag.Fishing] || Svc.Condition[ConditionFlag.Gathering];
         var navMeshRunning = Service.IPC.NavMeshIPC.IsRunning();
         var pathfindInProgress = Service.IPC.NavMeshIPC.PathfindInProgress();
         
-        if (!isFishing && !isMounted && !navMeshRunning && !pathfindInProgress)
+        if (EzThrottler.Throttle("AntiAfkCheck", 1000))
+        {
+            CheckForFishAmissMessage();
+        }
+        
+        if (!isFishing && !Player.Mounted && !navMeshRunning && !pathfindInProgress)
         {
             StartFishing(autohookPreset);
         }
@@ -235,8 +255,10 @@ public unsafe class DiademHelper : BaseModule
         foreach (var bait in requiredBaits)
         {
             var currentCount = inventoryManager->GetInventoryItemCount((uint)bait);
-            if (currentCount == 0)
+            PluginLog.Information($"Bait {bait} count: {currentCount} min: {BlueTools.Config.DiademMinBaitCount}");
+            if (currentCount <= BlueTools.Config.DiademMinBaitCount)
             {
+                PluginLog.Information($"Need to restock bait {bait}");
                 return true;
             }
         }
@@ -328,9 +350,9 @@ public unsafe class DiademHelper : BaseModule
 
     private void StopFishing()
     {
-        if (!Svc.Condition[ConditionFlag.Fishing]) return;
         if (P.TaskManager.IsBusy) return;
-        
+        if (!Svc.Condition[ConditionFlag.Fishing]) return;
+
         P.TaskManager.Enqueue(() => Fishing.QuitFishing());
         P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.DeleteAllAnonymousPresets());
     }
@@ -339,29 +361,27 @@ public unsafe class DiademHelper : BaseModule
     {
         if (GenericHelpers.TryGetAddonByName<AtkUnitBase>("_TextError", out var addon) && addon->IsVisible)
         {
-            var node = GenericHelpers.GetNodeByIDChain(addon->RootNode, 2);
+            var node = GenericHelpers.GetNodeByIDChain(addon->RootNode, 1, 2);
             if (node != null && node->GetNodeType() == NodeType.Text)
             {
                 var textNode = node->GetAsAtkTextNode();
-                CheckMessageAndRotate(textNode->NodeText.ToString());
+                var nodeText = textNode->NodeText.ToString();
+
+                // Check if the message contains the "fish sense something amiss" text
+                if (nodeText.Contains("fish sense something amiss", StringComparison.OrdinalIgnoreCase) ||
+                    nodeText.Contains("fish here have grown wise", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Throttle to prevent multiple rotations for the same message
+                    if (EzThrottler.Throttle("FishAmissRotation", 10000)) // 10 second cooldown
+                    {
+                        PluginLog.Information($"Detected fish amiss message, rotating position!");
+                        RotateToNextFishingPosition();
+                    }
+                }
             }
         }
     }
-    
-    private void CheckMessageAndRotate(string nodeText)
-    {
-        // Check if the message contains the "fish sense something amiss" text
-        if (nodeText.Contains("fish sense something amiss", StringComparison.OrdinalIgnoreCase) ||
-            nodeText.Contains("fish here have grown wise", StringComparison.OrdinalIgnoreCase))
-        {
-            // Throttle to prevent multiple rotations for the same message
-            if (EzThrottler.Throttle("FishAmissRotation", 10000)) // 10 second cooldown
-            {
-                PluginLog.Information($"Detected fish amiss message, rotating position!");
-                RotateToNextFishingPosition();
-            }
-        }
-    }
+
 
     /// <summary>
     /// Call this when you get the "fish sense something amiss" message to rotate to the next fishing spot
@@ -406,16 +426,16 @@ public unsafe class DiademHelper : BaseModule
         foreach (var bait in requiredBaits)
         {
             var currentCount = inventoryManager->GetInventoryItemCount((uint)bait);
-            if (currentCount < BlueTools.Config.DiademBaitCount)
+            if (currentCount < BlueTools.Config.DiademMaxBaitCount)
             {
-                itemsToBuy.Add(((uint)bait, BlueTools.Config.DiademBaitCount - currentCount));
+                itemsToBuy.Add(((uint)bait, BlueTools.Config.DiademMaxBaitCount - currentCount));
             }
         }
         
         // Only proceed if there are items to buy
         if (itemsToBuy.Count == 0) return;
         
-        PluginLog.Information($"Restocking bait for Grade {targetGrade}: {string.Join(", ", itemsToBuy.Select(x => $"{x.count}x{(BaitType)x.itemId}"))}");
+        PluginLog.Information($"Restocking bait for Grade {targetGrade}");
         
         // Move to merchant first
         P.TaskManager.Enqueue(() => Travel.MoveToPosition(merchantNPC.Position));

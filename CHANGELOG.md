@@ -1,3 +1,10 @@
+v0.0.5
+- fixed edge case where AH presets wont be removed on stopping the module
+- fixed an issue getting stuck at the bait merchant in Diadem
+- fixed an issue where multiple AH presets would be created over time while fishing
+- potentially fixed not rotating on anti-afk message
+- added minimum and maximum bait count options. It will restock to maximum when it hits minimum.
+
 v0.0.4
 - Fixed inability to change grade en-route
 - Fixed random position not resetting on module stop/start

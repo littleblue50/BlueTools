@@ -12,7 +12,7 @@ namespace BlueTools.Utils;
 
 public unsafe class Shop
 {
-    private readonly Dictionary<string, ShopPurchaseSession> activeSessions = new();
+    private ShopPurchaseSession? currentSession;
     
     private static EventFramework* EF => EventFramework.Instance();
     private static AgentShop* AS => AgentShop.Instance();
@@ -21,28 +21,25 @@ public unsafe class Shop
 
     public bool? ProcessPurchase(ulong vendorId, uint shopId, (uint itemId, int count)[] items)
     {
-        var sessionKey = $"{vendorId}_{shopId}";
-        
-        if (!activeSessions.TryGetValue(sessionKey, out var session))
+        // If we don't have a session or it's for a different shop, create a new one
+        if (currentSession == null || !currentSession.IsForShop(vendorId, shopId))
         {
-            session = new ShopPurchaseSession(vendorId, shopId, items);
-            activeSessions[sessionKey] = session;
+            currentSession = new ShopPurchaseSession(vendorId, shopId, items);
         }
 
-        var result = session.Process();
+        var result = currentSession.Process();
         
-        if (result != false) // Completed (true) or failed (null)
+        if (result != false)
         {
-            activeSessions.Remove(sessionKey);
+            currentSession = null;
         }
         
         return result;
     }
 
-    public void ClearAllSessions()
+    public void ClearSession()
     {
-        activeSessions.Clear();
-        PluginLog.Debug("Cleared all shop sessions");
+        currentSession = null;
     }
 
     public bool? BuyFromShop(ulong vendorInstanceId, uint shopId, uint itemId, int count)
@@ -57,7 +54,7 @@ public unsafe class Shop
 
     public void ClearShopStates()
     {
-        ClearAllSessions();
+        ClearSession();
     }
 
     private class ShopPurchaseSession
@@ -71,7 +68,6 @@ public unsafe class Shop
         private enum SessionState
         {
             Opening,
-            WaitingForShopOpen,
             WaitingForEvent,
             PurchasingItem,
             WaitingForTransaction,
@@ -88,6 +84,11 @@ public unsafe class Shop
             this.state = SessionState.Opening;
         }
 
+        public bool IsForShop(ulong vendorId, uint shopId)
+        {
+            return this.vendorId == vendorId && this.shopId == shopId;
+        }
+
         public bool? Process()
         {
             try
@@ -95,7 +96,6 @@ public unsafe class Shop
                 return state switch
                 {
                     SessionState.Opening => ProcessOpening(),
-                    SessionState.WaitingForShopOpen => ProcessWaitingForShopOpen(),
                     SessionState.WaitingForEvent => ProcessWaitingForEvent(),
                     SessionState.PurchasingItem => ProcessPurchasingItem(),
                     SessionState.WaitingForTransaction => ProcessWaitingForTransaction(),
@@ -119,24 +119,11 @@ public unsafe class Shop
                 return false;
             }
 
-            if (EzThrottler.Throttle($"ShopOpen_{vendorId}_{shopId}", 2000))
+            if (EzThrottler.Throttle($"ShopOpen_{vendorId}_{shopId}", 500))
             {
-                if (!TryOpenShop())
-                {
-                    PluginLog.Error($"Failed to open shop {vendorId:X}.{shopId:X}");
-                    return null;
-                }
+                TryOpenShop();
             }
 
-            state = SessionState.WaitingForShopOpen;
-            return false;
-        }
-
-        private bool? ProcessWaitingForShopOpen()
-        {
-            if (!IsShopOpen(shopId)) return false;
-            
-            state = SessionState.WaitingForEvent;
             return false;
         }
 
@@ -205,23 +192,38 @@ public unsafe class Shop
         private bool TryOpenShop()
         {
             var vendor = GOM->Objects.GetObjectByGameObjectId(vendorId);
-            if (vendor == null) return false;
+            if (vendor == null) 
+            {
+                PluginLog.Warning($"Vendor {vendorId:X} not found");
+                return false;
+            }
 
             TS->InteractWithObject(vendor);
             var selector = EventHandlerSelector.Instance();
             
-            if (selector->Target == null) return true;
-            if (selector->Target != vendor) return false;
+            if (selector->Target == null) 
+            {
+                return false;
+            }
+            
+            if (selector->Target != vendor) 
+            {
+                PluginLog.Warning($"Selector target mismatch - expected {vendorId:X}, got {selector->Target->GetGameObjectId():X}");
+                return false;
+            }
 
             for (int i = 0; i < selector->OptionsCount; ++i)
             {
-                if (selector->Options[i].Handler->Info.EventId.Id == shopId)
+                var optionShopId = selector->Options[i].Handler->Info.EventId.Id;
+                
+                if (optionShopId == shopId)
                 {
                     EF->InteractWithHandlerFromSelector(i);
                     return true;
                 }
             }
             
+            PluginLog.Warning($"Shop {shopId:X} not found in {selector->OptionsCount} options");
             return false;
         }
 

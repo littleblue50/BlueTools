@@ -10,5 +10,6 @@ public class Config : IEzConfig
     public int DiademTargetGrade { get; set; } = 4;
     public bool DiademShouldFish { get; set; } = true;
     public bool DiademShouldGather { get; set; } = false;
-    public int DiademBaitCount { get; set; } = 99;
+    public int DiademMinBaitCount { get; set; } = 0;
+    public int DiademMaxBaitCount { get; set; } = 99;
 }

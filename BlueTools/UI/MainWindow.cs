@@ -57,7 +57,7 @@ public class MainWindow : ConfigWindow
             }
             
             var shouldGather = BlueTools.Config.DiademShouldGather;
-            if (ImGui.Checkbox("Should Gather", ref shouldGather))
+            if (ImGui.Checkbox("Should Gather (Does nothing for now)", ref shouldGather))
             {
                 BlueTools.Config.DiademShouldGather = shouldGather;
                 EzConfig.Save();
@@ -66,14 +66,39 @@ public class MainWindow : ConfigWindow
             ImGui.Spacing();
             
             // Bait Count Configuration
-            ImGuiEx.Text("Bait Count:");
+            ImGuiEx.Text("Bait Count Configuration:");
+            
+            // Minimum Bait Count
+            ImGuiEx.Text("Minimum Bait Count:");
             ImGui.SameLine();
             
-            var baitCount = BlueTools.Config.DiademBaitCount;
+            var minBaitCount = BlueTools.Config.DiademMinBaitCount;
             ImGui.SetNextItemWidth(100);
-            if (ImGui.SliderInt("##BaitCount", ref baitCount, 1, 999))
+            if (ImGui.SliderInt("##MinBaitCount", ref minBaitCount, 0, 999))
             {
-                BlueTools.Config.DiademBaitCount = baitCount;
+                BlueTools.Config.DiademMinBaitCount = minBaitCount;
+                // Ensure max is at least equal to min
+                if (BlueTools.Config.DiademMaxBaitCount < minBaitCount)
+                {
+                    BlueTools.Config.DiademMaxBaitCount = minBaitCount;
+                }
+                EzConfig.Save();
+            }
+            
+            // Maximum Bait Count
+            ImGuiEx.Text("Maximum Bait Count:");
+            ImGui.SameLine();
+            
+            var maxBaitCount = BlueTools.Config.DiademMaxBaitCount;
+            ImGui.SetNextItemWidth(100);
+            if (ImGui.SliderInt("##MaxBaitCount", ref maxBaitCount, 1, 999))
+            {
+                BlueTools.Config.DiademMaxBaitCount = maxBaitCount;
+                // Ensure min is at most equal to max
+                if (BlueTools.Config.DiademMinBaitCount > maxBaitCount)
+                {
+                    BlueTools.Config.DiademMinBaitCount = maxBaitCount;
+                }
                 EzConfig.Save();
             }
             
