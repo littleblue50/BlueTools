@@ -22,6 +22,8 @@ public unsafe class DiademHelper : BaseModule
     private ulong diademEntryNPCObjectId = 4303233947;
     
     private int currentTargetGrade = BlueTools.Config.DiademTargetGrade;
+
+    private bool hitAfkCheck = false;
     
     private enum ActionState
     {
@@ -178,7 +180,12 @@ public unsafe class DiademHelper : BaseModule
 
         if (Player.Job != Job.FSH)
         {
-            Service.Utils.PlayerHelper.ChangeJob(Job.FSH);
+            if (!Service.Utils.PlayerHelper.ChangeJob(Job.FSH))
+            {
+                PluginLog.Error("Failed to become a fisher, disabling module");
+                Disable();
+                return;
+            }
         }
         
         var currentWeather = Weather.GetCurrentWeather();
@@ -206,7 +213,6 @@ public unsafe class DiademHelper : BaseModule
         // Check if we're in the right position
         if (!IsAtCorrectFishingPosition(targetGrade, currentWeather.Value))
         {
-            PluginLog.Information($"Moving to fishing spot for {currentWeather.Value} Grade {targetGrade}");
             StopFishing();
             MoveToFishingPosition(fishingPosition, targetGrade, currentWeather.Value);
             return;
@@ -240,9 +246,13 @@ public unsafe class DiademHelper : BaseModule
             CheckForFishAmissMessage();
         }
         
-        if (!isFishing && !Player.Mounted && !navMeshRunning && !pathfindInProgress)
+        if (!isFishing && !Player.Mounted && !navMeshRunning && !pathfindInProgress && !hitAfkCheck)
         {
             StartFishing(autohookPreset);
+        }
+        else if (hitAfkCheck)
+        {
+            RotateToNextFishingPosition();
         }
     }
 
@@ -255,7 +265,6 @@ public unsafe class DiademHelper : BaseModule
         foreach (var bait in requiredBaits)
         {
             var currentCount = inventoryManager->GetInventoryItemCount((uint)bait);
-            PluginLog.Information($"Bait {bait} count: {currentCount} min: {BlueTools.Config.DiademMinBaitCount}");
             if (currentCount <= BlueTools.Config.DiademMinBaitCount)
             {
                 PluginLog.Information($"Need to restock bait {bait}");
@@ -313,6 +322,8 @@ public unsafe class DiademHelper : BaseModule
         if (Service.IPC.NavMeshIPC.IsRunning()) return;
         if (P.TaskManager.IsBusy) return;
         
+        PluginLog.Information($"Moving to fishing spot for {currentWeather} Grade {targetGrade}");
+            
         if (fishingPosition.HasValue)
         {
             var landingPosition = DiademFish.GetLandingPosition(targetGrade, currentWeather);
@@ -343,6 +354,8 @@ public unsafe class DiademHelper : BaseModule
     {
         if (P.TaskManager.IsBusy) return;
         
+        // delete all anonymous presets before creating one to be safe
+        P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.DeleteAllAnonymousPresets());
         P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.CreateAndSelectAnonymousPreset(autohookPreset));
         P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.SetPluginState(true));
         P.TaskManager.Enqueue(() => Fishing.StartFishing());
@@ -359,26 +372,42 @@ public unsafe class DiademHelper : BaseModule
 
     private void CheckForFishAmissMessage()
     {
-        if (GenericHelpers.TryGetAddonByName<AtkUnitBase>("_TextError", out var addon) && addon->IsVisible)
+        PluginLog.Debug("CheckForFishAmissMessage: Checking for _ScreenText addon");
+        
+        if (GenericHelpers.TryGetAddonByName<AtkUnitBase>("_ScreenText", out var addon) && addon->IsVisible)
         {
-            var node = GenericHelpers.GetNodeByIDChain(addon->RootNode, 1, 2);
-            if (node != null && node->GetNodeType() == NodeType.Text)
+            PluginLog.Debug("CheckForFishAmissMessage: _ScreenText addon found and visible");
+            
+            var componentNode = GenericHelpers.GetNodeByIDChain(addon->RootNode, 1, 40001);
+            var node = GenericHelpers.GetNodeByIDChain(addon->RootNode, 1, 40001, 2, 3);
+            if (componentNode->IsVisible() && node != null && node->GetNodeType() == NodeType.Text)
             {
                 var textNode = node->GetAsAtkTextNode();
                 var nodeText = textNode->NodeText.ToString();
+
+                PluginLog.Information($"CheckForFishAmissMessage: Detected message: '{nodeText}'");
 
                 // Check if the message contains the "fish sense something amiss" text
                 if (nodeText.Contains("fish sense something amiss", StringComparison.OrdinalIgnoreCase) ||
                     nodeText.Contains("fish here have grown wise", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Throttle to prevent multiple rotations for the same message
-                    if (EzThrottler.Throttle("FishAmissRotation", 10000)) // 10 second cooldown
-                    {
-                        PluginLog.Information($"Detected fish amiss message, rotating position!");
-                        RotateToNextFishingPosition();
-                    }
+                    PluginLog.Information($"Anti-AFK message detected! Message: '{nodeText}'");
+                    hitAfkCheck = true;
+                }
+                else
+                {
+                    hitAfkCheck = false;
+                    PluginLog.Debug($"CheckForFishAmissMessage: Message does not match fish amiss patterns: '{nodeText}'");
                 }
             }
+            else
+            {
+                PluginLog.Debug("CheckForFishAmissMessage: No text node found or wrong node type: " + node->GetNodeType());
+            }
+        }
+        else
+        {
+            PluginLog.Debug("CheckForFishAmissMessage: _ScreenText addon not found or not visible");
         }
     }
 
@@ -404,10 +433,12 @@ public unsafe class DiademHelper : BaseModule
         var nextPosition = DiademFish.GetNextFishingPosition(targetGrade, currentWeather.Value);
         MoveToFishingPosition(nextPosition, targetGrade, currentWeather.Value);
         
-        // Start fishing at the new position
+        hitAfkCheck = false;
+
         var autohookPreset = DiademFish.GetAutohookPreset(targetGrade, currentWeather.Value);
         if (autohookPreset != null)
         {
+            P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.DeleteAllAnonymousPresets());
             P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.CreateAndSelectAnonymousPreset(autohookPreset));
             P.TaskManager.Enqueue(() => Service.IPC.AutohookIPC.SetPluginState(true));
             P.TaskManager.Enqueue(() => Fishing.StartFishing());

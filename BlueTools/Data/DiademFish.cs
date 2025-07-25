@@ -37,7 +37,7 @@ public static class DiademFish
                 FishingPositions: [
                     new Vector3(588.12555f, 222.20378f, -253.84512f),
                     new Vector3(586.257f, 222.10025f, -229.39746f),
-                    new Vector3(613.0804f, 222.1041f, -283.7225f),
+                    new Vector3(620.8661f, 221.44586f, -293.0172f),
                     new Vector3(600.39264f, 222.28319f, -269.51248f),
                 ]
             ) 

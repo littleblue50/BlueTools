@@ -1,3 +1,9 @@
+v0.0.6
+- fixed a bug when unable to change to a fisher
+- updated a fishing spot
+- fixed a bug causing excessive preset creation in some situations
+- fixed a bug where the player wouldn't be moved after an anti-afk hit
+
 v0.0.5
 - fixed edge case where AH presets wont be removed on stopping the module
 - fixed an issue getting stuck at the bait merchant in Diadem
